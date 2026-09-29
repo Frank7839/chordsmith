@@ -1,0 +1,23 @@
+{
+  "name": "Chordsmith Studio",
+  "short_name": "Chordsmith",
+  "description": "Find chords in any key, build progressions and write songs with timed chord sheets.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#EDF0EB",
+  "theme_color": "#0E6B5C",
+  "categories": ["music", "education", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "screen-1.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Chords in any key" },
+    { "src": "screen-2.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Circle of fifths" },
+    { "src": "screen-3.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Timed chord sheet" }
+  ]
+}
