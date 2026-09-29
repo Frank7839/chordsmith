@@ -1396,10 +1396,28 @@ $('play').addEventListener('click',()=>playing?stop():play());
 $('lyrics').value=S.lyrics;
 let lt; $('lyrics').addEventListener('input',e=>{S.lyrics=e.target.value; clearTimeout(lt); lt=setTimeout(()=>{analyze(); save();},150);});
 
+function sheetText(){
+  const {blocks}=buildSheet(); const out=[];
+  blocks.forEach(b=>{
+    if(b.title!==null){ if(out.length&&out[out.length-1]!=='') out.push(''); out.push(`[${b.title}]`); }
+    b.lines.forEach(ln=>{
+      if(ln.gap){ if(out.length&&out[out.length-1]!=='') out.push(''); return; }
+      let cl='';
+      ln.words.forEach(w=>{ if(!w.chords.length) return;
+        const name=w.chords.map(c=>c.name).join(' ');
+        let pos=w.start; if(cl.length&&pos<=cl.length) pos=cl.length+1;
+        cl=cl.padEnd(pos,' ')+name; });
+      if(cl.trim()) out.push(cl.replace(/\s+$/,''));
+      if(ln.text) out.push(ln.text);
+    });
+  });
+  while(out.length&&out[out.length-1]==='') out.pop();
+  return out.join('\n');
+}
 $('copyBtn').addEventListener('click',()=>{
   const secs=S.sections.map(sec=>{const cs=sec.prog.map(resolve);
     return cs.length?`${secLabel(sec.name)}: ${cs.map(c=>symbol(c)+(c.beats!==4?` (${c.beats})`:'')).join(' | ')}   [${cs.map(roman).join(' – ')}]`:`${secLabel(sec.name)}: ${t('chart_none')}`;}).join('\n');
-  const text=`${S.name}\n${t('chart_key')}: ${nn(S.root)} ${modeName(S.mode)} · ${S.bpm} BPM${S.capo?` · ${t('chart_capo')} ${S.capo}`:''}\n\n${secs}\n\n${S.lyrics}`;
+  const text=`${S.name}\n${t('chart_key')}: ${nn(S.root)} ${modeName(S.mode)} · ${S.bpm} BPM${S.capo?` · ${t('chart_capo')} ${S.capo}`:''}\n\n${secs}\n\n${sheetText()}`;
   const out=$('copyOut');
   const fallback=()=>{ out.value=text; out.hidden=false; out.focus(); out.select(); status(t('selectCopy')); };
   try{ navigator.clipboard.writeText(text).then(()=>{out.hidden=true; status(t('copied'));},fallback); }catch(e){ fallback(); }
