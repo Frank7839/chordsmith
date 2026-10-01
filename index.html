@@ -149,6 +149,20 @@ select,input[type=number]{background:var(--surface);border:1px solid var(--line)
 .bpm{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
 .bpm input[type=range]{accent-color:var(--accent);width:120px}
 .bpm output{font-family:var(--f-mono);font-variant-numeric:tabular-nums;min-width:3ch}
+.guide .row-h{align-items:center}
+.guide .sec-tools{margin-block:10px}
+.guide.off #gOpts{opacity:.55}
+.clips{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+.clips summary{cursor:pointer;font-size:13px;font-weight:700}
+.clips summary span{font-family:var(--f-mono);font-weight:400;color:var(--muted);margin-left:6px}
+.clips p.hint{margin-block:10px}
+.clips code{font-family:var(--f-mono);font-size:12px}
+.clips label.btn{cursor:pointer}
+.clipgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}
+.clipgrid button{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface-2);border-radius:8px;padding:6px 8px;font-size:12px;font-weight:600;text-align:left;min-width:0}
+.clipgrid button i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--line)}
+.clipgrid button.app i,.clipgrid button.mine i{background:var(--accent)}
+.clipgrid button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px}
 .legend i{display:inline-block;width:10px;height:3px;border-radius:2px;background:var(--fn);margin-right:6px;vertical-align:middle}
 
@@ -380,6 +394,52 @@ footer{margin-top:36px;color:var(--muted);font-size:12px;border-top:1px solid va
         </div>
       </div>
 
+      <div class="panel guide" id="guidePanel">
+        <div class="row-h">
+          <div class="label">In-ear guide</div>
+          <label class="toggle"><input type="checkbox" id="gOn"> <span>Voice guide</span></label>
+        </div>
+        <p class="hint">Counts the band in and calls each section a bar early, like the guide track in your in-ears. Works with all three play modes.</p>
+        <div id="gOpts">
+          <div class="sec-tools">
+            <div class="grp">
+              <label class="inline" for="gCount">Count-in <select id="gCount"><option value="0">None</option><option value="1">1 bar</option><option value="2">2 bars</option></select></label>
+              <label class="inline" for="gAhead">Call <select id="gAhead"><option value="1">1 bar early</option><option value="2">2 bars early</option></select></label>
+            </div>
+            <div class="grp">
+              <label class="toggle"><input type="checkbox" id="gCalls"> <span>Section calls</span></label>
+              <label class="toggle"><input type="checkbox" id="gLyr"> <span>Lyric cues</span></label>
+            </div>
+          </div>
+          <div class="sec-tools">
+            <label class="inline" for="gCue">Extra call before <b id="gCueSec">Verse</b> <select id="gCue"></select></label>
+          </div>
+          <div class="sec-tools">
+            <div class="grp">
+              <label class="bpm" for="gVol">Guide <input type="range" id="gVol" min="0" max="100" step="1"></label>
+              <label class="bpm" for="gClick">Click <input type="range" id="gClick" min="0" max="100" step="1"></label>
+            </div>
+            <label class="toggle"><input type="checkbox" id="gSplit"> <span>Split: guide + click left, music right</span></label>
+          </div>
+          <p class="hint" id="gNote"></p>
+          <details class="clips" id="gClips">
+            <summary>Voice clips <span id="gClipCount"></span></summary>
+            <p class="hint">Missing clips use your phone’s built-in voice, which can land a little late. Load your recorded voice for exact timing: either <b>one recording</b> of all the words in order (split automatically), or <b>separate files</b> named like <code>chorus.mp3</code>. Loaded clips stay on this device.</p>
+            <div class="sec-tools">
+              <div class="grp">
+                <label class="btn primary" for="gOne">Load one recording</label><input type="file" id="gOne" accept="audio/*" hidden>
+                <label class="btn" for="gMany">Load separate files</label><input type="file" id="gMany" accept="audio/*" multiple hidden>
+              </div>
+              <div class="grp">
+                <button class="btn" id="gTest" type="button">Test guide</button>
+                <button class="btn" id="gClear" type="button">Remove loaded clips</button>
+              </div>
+            </div>
+            <div class="clipgrid" id="gGrid"></div>
+          </details>
+        </div>
+      </div>
+
       <div class="panel">
         <div class="row-h">
           <div class="label" id="playItLabel">How to play Verse</div>
@@ -606,7 +666,9 @@ try{const saved=JSON.parse(localStorage.getItem('chordsmith-v1')||'null');
   }}catch(e){}
 if(!Array.isArray(S.sections)||!S.sections.length) S.sections=[{name:'Verse',prog:[]}];
 if(!(S.cur>=0&&S.cur<S.sections.length)) S.cur=0;
-const SEC_NAMES=['Intro','Verse','Pre-Chorus','Chorus','Bridge','Solo','Outro'];
+const G_DEF={on:false,count:1,ahead:1,calls:true,lyr:false,vol:85,click:70,split:false};
+S.guide={...G_DEF,...(S.guide&&typeof S.guide==='object'?S.guide:{})};
+const SEC_NAMES=['Intro','Verse','Pre-Chorus','Chorus','Bridge','Solo','Interlude','Instrumental','Tag','Outro'];
 const P=()=>S.sections[S.cur].prog;
 const setP=v=>{S.sections[S.cur].prog=v;};
 const SONG_KEYS=['name','root','mode','sev','bpm','sections','cur','lyrics','lang','bpl','capo','playMode'];
@@ -672,10 +734,21 @@ function ensureCtx(){
   if(!master) newMaster();
   return ctx;
 }
+let cueBus=null, voiceG=null, clickG=null, panM=null, panC=null;
+const gVolOf=()=>Math.pow(S.guide.vol/100,1.4)*1.6;
+const cVolOf=()=>S.guide.click/70;
 function newMaster(){
   const comp=ctx.createDynamicsCompressor(); comp.threshold.value=-18; comp.ratio.value=3;
-  master=ctx.createGain(); master.gain.value=.55; master.connect(comp); comp.connect(ctx.destination);
+  master=ctx.createGain(); master.gain.value=.55; master.connect(comp);
+  // Guide voice and click get their own bus, so they can be panned away from the music for in-ear rigs.
+  cueBus=ctx.createGain(); voiceG=ctx.createGain(); clickG=ctx.createGain();
+  voiceG.gain.value=gVolOf(); clickG.gain.value=cVolOf(); voiceG.connect(cueBus); clickG.connect(cueBus);
+  if(ctx.createStereoPanner){
+    panM=ctx.createStereoPanner(); panC=ctx.createStereoPanner(); setSplit();
+    comp.connect(panM); panM.connect(ctx.destination); cueBus.connect(panC); panC.connect(ctx.destination);
+  }else{ panM=panC=null; comp.connect(ctx.destination); cueBus.connect(ctx.destination); }
 }
+function setSplit(){ if(!panM) return; const s=S.guide.split; panM.pan.value=s?1:0; panC.pan.value=s?-1:0; }
 const hz=m=>440*Math.pow(2,(m-69)/12);
 function voice(m,t,dur,vol,kind=S.sound){
   const g=ctx.createGain(), end=t+dur;
@@ -739,7 +812,7 @@ function clickAt(t,accent){
   const o=ctx.createOscillator(), g=ctx.createGain();
   o.frequency.value=accent?1700:1150; o.type='sine';
   g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(accent?.35:.2,t+.002); g.gain.exponentialRampToValueAtTime(.0001,t+.05);
-  o.connect(g); g.connect(master); o.start(t); o.stop(t+.06);
+  o.connect(g); g.connect(clickG||master); o.start(t); o.stop(t+.06);
 }
 function audition(c){
   if(!ensureCtx()) return;
@@ -754,9 +827,14 @@ function queue(){
   const q=[]; secs.forEach(si=>S.sections[si].prog.forEach((raw,k)=>{const c=resolve(raw); q.push({si,k,c,beats:c.beats});}));
   return q;
 }
-function scheduleFrom(t0){
+function scheduleFrom(t0,first){
   const q=queue(); if(!q.length){stop();return;}
-  const spb=60/S.bpm; let t=t0;
+  const spb=60/S.bpm;
+  if(S.guide.on){
+    if(first&&S.guide.count>0) t0=countIn(t0,S.guide.count,spb);
+    scheduleGuide(q,t0,spb,first);
+  }
+  let t=t0;
   const seq=pianoSeq(q.filter(x=>x.c).map(x=>x.c)); let n=0;
   q.forEach(x=>{
     const d=x.beats*spb, notes=x.c?seq[n++]:null;
@@ -771,10 +849,17 @@ function scheduleFrom(t0){
   });
   timers.push(setTimeout(()=>{ if(playing) scheduleFrom(t); },Math.max(0,(t-ctx.currentTime-.2)*1000)));
 }
-function play(){ if(!queue().length||!ensureCtx()) return; playing=true; renderPlay(); scheduleFrom(ctx.currentTime+.06); }
+async function play(){
+  if(!queue().length||!ensureCtx()) return; playing=true; renderPlay();
+  if(S.guide.on){ await Promise.race([loadClips(),new Promise(r=>setTimeout(r,2000))]); if(!playing) return; }
+  scheduleFrom(ctx.currentTime+.08,true);
+}
 function stop(){
   playing=false; timers.forEach(clearTimeout); timers=[];
-  if(ctx&&master){const old=master; old.gain.setTargetAtTime(0,ctx.currentTime,.03); setTimeout(()=>{try{old.disconnect();}catch(e){}},400); newMaster();}
+  cueNodes.forEach(n=>{try{n.stop();}catch(e){}}); cueNodes=[];
+  if(TTS){ try{speechSynthesis.cancel();}catch(e){} }
+  if(ctx&&master){const old=master, oldCue=cueBus; old.gain.setTargetAtTime(0,ctx.currentTime,.03); if(oldCue) oldCue.gain.setTargetAtTime(0,ctx.currentTime,.01);
+    setTimeout(()=>{try{old.disconnect();}catch(e){} try{oldCue&&oldCue.disconnect();}catch(e){}},400); newMaster();}
   sounding=-1; markPlaying(-1); markSheet(); lightKeys([]); renderPlay();
   hostTick(null);
 }
@@ -893,6 +978,7 @@ function render(){
   renderPlayIt();
   renderCircle();
   renderSongs();
+  renderGuide();
   analyze();
 }
 function commit(){ save(); render(); }
@@ -1222,7 +1308,7 @@ function buildSheet(){
     blk.lines.push({text:clean,inline,id:'ln'+(lnN++)});
   });
   const events=[], L=S.bpl;
-  blocks.forEach(b=>{
+  blocks.forEach((b,bi)=>{
     const lines=b.lines.filter(l=>!l.gap), n=lines.length; if(!n) return;
     const prog=b.si>=0?S.sections[b.si].prog:[];
     let evs=[];
@@ -1242,7 +1328,7 @@ function buildSheet(){
       e.beats=(i+1<evs.length?evs[i+1].start:n*L)-e.start; if(e.beats<=0) return;
       const j=Math.min(n-1,Math.floor(e.start/L)), ln=lines[j];
       e.ev='ev'+(evN++); e.lineId=ln.id;
-      if(e.rest) { events.push({c:null,beats:e.beats,si:b.si,ev:null,line:ln.id}); return; }
+      if(e.rest) { events.push({c:null,beats:e.beats,si:b.si,ev:null,line:ln.id,blk:bi,title:b.title}); return; }
       let wi;
       if(e.pos!==undefined){ wi=ln.words.findIndex(w=>w.start+w.w.length>e.pos); if(wi<0) wi=ln.words.length-1; }
       else { const target=(e.start-j*L)/L*ln.syl.reduce((a,x)=>a+x,0); let acc=0; wi=0;
@@ -1251,7 +1337,7 @@ function buildSheet(){
       if(capoNames) name=e.sym?shiftSym(e.sym,S.capo):SHARP[(((S.root+e.c.off-S.capo)%12)+12)%12]+suffix(e.c);
       const tgt=ln.words[Math.max(0,wi)]; if(tgt) tgt.chords.push({name,ev:e.ev,inl:!e.auto});
       else { ln.words.push({w:'',start:0,chords:[{name,ev:e.ev,inl:!e.auto}]}); }
-      events.push({c:e.c,beats:e.beats,si:b.si,k:e.auto?e.k:undefined,ev:e.ev,line:ln.id});
+      events.push({c:e.c,beats:e.beats,si:b.si,k:e.auto?e.k:undefined,ev:e.ev,line:ln.id,blk:bi,title:b.title});
     });
   });
   return {blocks,events};
@@ -1385,7 +1471,7 @@ $('clear').addEventListener('click',()=>{ if(!P().length) return; snapshot(); se
 $('secName').addEventListener('change',e=>{S.sections[S.cur].name=e.target.value; commit();});
 $('dupSec').addEventListener('click',()=>{
   if(S.sections.length>=12){status(t('max12'));return;}
-  const src=S.sections[S.cur]; S.sections.splice(S.cur+1,0,{name:src.name,prog:JSON.parse(JSON.stringify(src.prog))}); S.cur++; commit(); status(t('duplicated',{x:secLabel(src.name)}));
+  const src=S.sections[S.cur]; S.sections.splice(S.cur+1,0,{name:src.name,cue:src.cue||'',prog:JSON.parse(JSON.stringify(src.prog))}); S.cur++; commit(); status(t('duplicated',{x:secLabel(src.name)}));
 });
 $('delSec').addEventListener('click',()=>{
   if(S.sections.length<2) return; snapshot(); const nm=S.sections[S.cur].name;
@@ -1486,6 +1572,241 @@ function transpose(n){
 }
 $('trDown').addEventListener('click',()=>transpose(-1));
 $('trUp').addEventListener('click',()=>transpose(1));
+
+/* ---------- in-ear voice guide ---------- */
+// Order matters: "Load one recording" maps the words it finds to this list, top to bottom.
+const CLIPS=[
+  ['1','One'],['2','Two'],['3','Three'],['4','Four'],
+  ['intro','Intro'],['verse','Verse'],['verse-1','Verse one'],['verse-2','Verse two'],['verse-3','Verse three'],['verse-4','Verse four'],
+  ['pre-chorus','Pre-chorus'],['chorus','Chorus'],['bridge','Bridge'],['solo','Solo'],['interlude','Interlude'],['instrumental','Instrumental'],['tag','Tag'],['outro','Outro'],
+  ['build','Build'],['down','Down'],['all-in','All in'],['big','Big'],['hits','Hits'],['break','Break'],['last-time','Last time'],['key-change','Key change']
+];
+const CUES=['build','down','all-in','big','hits','break','last-time','key-change'];
+const clipText=id=>(CLIPS.find(c=>c[0]===id)||[,id.replace(/-/g,' ')])[1];
+const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+const DIGITS=s=>s.replace(/[०-९]/g,d=>d.charCodeAt(0)-0x966).replace(/[౦-౯]/g,d=>d.charCodeAt(0)-0xC66);
+const TTS='speechSynthesis' in window;
+const LANGTAG={en:'en-IN',hi:'hi-IN',te:'te-IN'};
+const clipBuf={}, clipSrc={}; let clipsReady=null, cueNodes=[];
+
+function mono(ab){ const n=ab.numberOfChannels, L=ab.length, out=new Float32Array(L);
+  for(let c=0;c<n;c++){ const d=ab.getChannelData(c); for(let i=0;i<L;i++) out[i]+=d[i]/n; } return out; }
+// Generated speech usually starts with a little silence. Cut it, so the word lands exactly on the beat.
+function trimBuf(d,sr){
+  let peak=0; for(let i=0;i<d.length;i++){ const a=Math.abs(d[i]); if(a>peak) peak=a; }
+  const th=Math.max(.004,peak*.05); let a=0,b=d.length-1;
+  while(a<d.length&&Math.abs(d[a])<th) a++;
+  while(b>a&&Math.abs(d[b])<th*.5) b--;
+  a=Math.max(0,a-Math.round(sr*.003)); b=Math.min(d.length-1,b+Math.round(sr*.08));
+  const out=d.slice(a,b+1), f=Math.min(out.length,Math.round(sr*.002));
+  for(let i=0;i<f;i++) out[i]*=i/f;   // tiny fade-in, no click
+  return out;
+}
+function toBuf(d,sr){ const b=ctx.createBuffer(1,d.length,sr); b.getChannelData(0).set(d); return b; }
+
+const idb=(()=>{
+  let p=null;
+  const open=()=>p||(p=new Promise((res,rej)=>{ try{ const r=indexedDB.open('chordsmith-voice',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('clips'); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }catch(e){ rej(e); } }));
+  const run=(mode,fn)=>open().then(db=>new Promise((res,rej)=>{ const tx=db.transaction('clips',mode); const out=fn(tx.objectStore('clips')); tx.oncomplete=()=>res(out); tx.onerror=()=>rej(tx.error); }));
+  return {
+    all:()=>run('readonly',st=>{ const out={}; const r=st.openCursor(); r.onsuccess=()=>{ const c=r.result; if(c){ out[c.key]=c.value; c.continue(); } }; return out; }),
+    put:(k,v)=>run('readwrite',st=>{ st.put(v,k); }),
+    clear:()=>run('readwrite',st=>{ st.clear(); })
+  };
+})();
+
+function loadClips(force){
+  if(clipsReady&&!force) return clipsReady;
+  if(!ensureCtx()) return Promise.resolve();
+  clipsReady=(async()=>{
+    let mine={}; try{ mine=await idb.all(); }catch(e){}
+    // A single voice/all.mp3 in the app folder gives every user the voice: it's split into words like "Load one recording".
+    let pack=null;
+    try{ const r=await fetch('voice/all.mp3'); if(r.ok){ const ab=await ctx.decodeAudioData(await r.arrayBuffer());
+      const segs=splitWords(mono(ab),ab.sampleRate,CLIPS.length); if(segs.length===CLIPS.length) pack={segs,sr:ab.sampleRate}; } }catch(e){}
+    await Promise.all(CLIPS.map(async([id],i)=>{
+      const m=mine[id];
+      if(m&&m.data){ clipBuf[id]=toBuf(m.data,m.sr); clipSrc[id]='mine'; return; }
+      if(pack){ clipBuf[id]=toBuf(pack.segs[i],pack.sr); clipSrc[id]='app'; return; }
+      try{
+        const r=await fetch(`voice/${id}.mp3`); if(!r.ok) throw 0;
+        const ab=await ctx.decodeAudioData(await r.arrayBuffer());
+        clipBuf[id]=toBuf(trimBuf(mono(ab),ab.sampleRate),ab.sampleRate); clipSrc[id]='app';
+      }catch(e){ delete clipBuf[id]; clipSrc[id]='phone'; }
+    }));
+    renderClips();
+  })();
+  return clipsReady;
+}
+
+let voices=[];
+function loadVoices(){ try{ voices=speechSynthesis.getVoices()||[]; }catch(e){} }
+if(TTS){ loadVoices(); try{ speechSynthesis.addEventListener('voiceschanged',loadVoices); }catch(e){} }
+function pickVoice(tag){ const pre=tag.slice(0,2); return voices.find(v=>v.lang===tag)||voices.find(v=>(v.lang||'').replace('_','-').startsWith(pre)); }
+// Phone voice fallback. It can't be scheduled on the audio clock, so it fires a touch early and may still land late.
+function speakAt(text,t,lang='en',rate=1.15){
+  if(!TTS||!text) return;
+  const ms=Math.max(0,(t-ctx.currentTime)*1000-120);
+  timers.push(setTimeout(()=>{ try{
+    const u=new SpeechSynthesisUtterance(text); u.lang=LANGTAG[lang]||'en-IN';
+    const v=pickVoice(u.lang); if(v) u.voice=v; u.rate=rate; u.volume=Math.min(1,S.guide.vol/100);
+    speechSynthesis.speak(u);
+  }catch(e){} },ms));
+}
+// Play a clip exactly at time t (audio clock). Falls back to a parent clip ("verse-2" -> "verse"), then to the phone voice.
+function sayAt(id,t,label){
+  let use=clipBuf[id]?id:null;
+  if(!use){ const base=id.replace(/-\d+$/,''); if(clipBuf[base]) use=base; }
+  if(use){ const s=ctx.createBufferSource(); s.buffer=clipBuf[use]; s.connect(voiceG); s.start(Math.max(t,ctx.currentTime)); cueNodes.push(s); s.onended=()=>{ const i=cueNodes.indexOf(s); if(i>=0) cueNodes.splice(i,1); }; return; }
+  speakAt(label||clipText(id),t);
+}
+
+function countIn(t0,bars,spb){
+  for(let b=0;b<bars*4;b++) clickAt(t0+b*spb,b%4===0);
+  const words=bars===2?[[0,'1'],[2,'2']]:[];          // 2 bars: "One . Two . | One Two Three Four"
+  const o=(bars-1)*4; ['1','2','3','4'].forEach((id,i)=>words.push([o+i,id]));
+  words.forEach(([b,id])=>sayAt(id,t0+b*spb));
+  return t0+bars*4*spb;
+}
+
+// What to call a section: its clip id and spoken label.
+function callFor(x){
+  let name, num=null;
+  if(S.playMode==='lyrics'){
+    const title=(x.title||'').trim(); const m=DIGITS(title).match(/(\d+)\s*$/); if(m) num=+m[1];
+    name=x.si>=0?S.sections[x.si].name:title.replace(/\s*[\d०-९౦-౯]+\s*$/,'');
+  } else name=S.sections[x.si].name;
+  if(!name) return null;
+  const base=slug(name)||'section';
+  return {base,num,name};
+}
+function idOf(c){ return c.num?`${c.base}-${c.num}`:c.base; }
+function labelOf(c){ const known=CLIPS.find(k=>k[0]===idOf(c)); return known?known[1]:(c.num?`${c.name} ${c.num}`:c.name); }
+
+function scheduleGuide(q,t0,spb,first){
+  const g=S.guide, bar=4*spb, ahead=g.ahead*bar, now=ctx.currentTime+.03;
+  const starts=[]; let tt=t0; q.forEach(x=>{ starts.push(tt); tt+=x.beats*spb; }); const passEnd=tt;
+  // Section starts in this pass.
+  const bounds=[];
+  q.forEach((x,i)=>{
+    const isB=i===0||(S.playMode==='lyrics'?x.blk!==q[i-1].blk:x.k===0);
+    if(!isB) return; const c=(x.si>=0||x.title)?callFor(x):null; if(c) bounds.push({i,t:starts[i],x,c});
+  });
+  // "Play sections in order": number repeated sections (Verse 1, Verse 2...) when the song has more than one.
+  if(S.playMode==='song'){
+    const tally={}; bounds.forEach(b=>tally[b.c.base]=(tally[b.c.base]||0)+1);
+    const seen={}; bounds.forEach(b=>{ if(tally[b.c.base]>1) b.c.num=seen[b.c.base]=(seen[b.c.base]||0)+1; });
+  }
+  const cueOf=x=>x.si>=0?(S.sections[x.si].cue||''):'';
+  const call=(b,T,earliest)=>{
+    const ct=Math.max(T-ahead,earliest,now);
+    if(g.calls) sayAt(idOf(b.c),ct,labelOf(b.c));
+    const cue=cueOf(b.x);
+    if(cue&&T-ct>=2.5*spb) sayAt(cue,ct+2*spb);          // beat 3 of the call bar
+    else if(cue&&!g.calls) sayAt(cue,ct);
+  };
+  bounds.forEach((b,j)=>{ if(j>0) call(b,b.t,bounds[j-1].t); });
+  // The next pass starts with bounds[0] again, so call it from the end of this one.
+  if(bounds.length) call(bounds[0],passEnd,bounds[bounds.length-1].t);
+
+  if(g.lyr&&S.playMode==='lyrics'&&TTS){
+    const text={}; buildSheet().blocks.forEach(b=>b.lines.forEach(l=>{ if(l.id) text[l.id]=l.text; }));
+    const lead=Math.max(2*spb,1.4), lang=SONG();
+    const firstWords=id=>(text[id]||'').split(/\s+/).filter(Boolean).slice(0,4).join(' ');
+    const lines=[]; q.forEach((x,i)=>{ if(x.line&&(i===0||x.line!==q[i-1].line)) lines.push({i,t:starts[i],x}); });
+    const skip=l=>bounds.some(b=>b.i===l.i&&cueOf(b.x));      // don't talk over an extra call
+    lines.forEach((l,j)=>{ if(j===0&&first){ if(!skip(l)) speakAt(firstWords(l.x.line),Math.max(now,l.t-lead),lang,1.25); return; }
+      if(j>0&&!skip(l)) speakAt(firstWords(l.x.line),Math.max(l.t-lead,lines[j-1].t,now),lang,1.25); });
+    if(lines.length&&!skip(lines[0])) speakAt(firstWords(lines[0].x.line),Math.max(passEnd-lead,lines[lines.length-1].t,now),lang,1.25);
+  }
+}
+
+/* --- clip loading from the user's own recordings --- */
+async function decodeFile(f){ ensureCtx(); const ab=await ctx.decodeAudioData(await f.arrayBuffer()); return {d:mono(ab),sr:ab.sampleRate}; }
+// Split one long recording into words at the silences, trying a few gap lengths until the count matches.
+function splitWords(d,sr,want){
+  const win=Math.round(sr*.01), n=Math.floor(d.length/win), rms=new Float32Array(n); let peak=0;
+  for(let w=0;w<n;w++){ let s=0; for(let i=w*win;i<(w+1)*win;i++) s+=d[i]*d[i]; rms[w]=Math.sqrt(s/win); if(rms[w]>peak) peak=rms[w]; }
+  const th=Math.max(.004,peak*.06); let best=null;
+  for(const gap of [30,40,24,55,20,70]){
+    const segs=[]; let st=-1, quiet=0;
+    for(let w=0;w<n;w++){
+      if(rms[w]>th){ if(st<0) st=w; quiet=0; }
+      else if(st>=0&&++quiet>=gap){ const en=w-quiet+1; if(en-st>=8) segs.push([st,en]); st=-1; quiet=0; }
+    }
+    if(st>=0&&n-st>=8) segs.push([st,n]);
+    if(!best||Math.abs(segs.length-want)<Math.abs(best.length-want)) best=segs;
+    if(segs.length===want) break;
+  }
+  return best.map(([a,b])=>trimBuf(d.slice(Math.max(0,a-3)*win,Math.min(n,b+6)*win),sr));
+}
+async function storeClip(id,data,sr){ try{ await idb.put(id,{data,sr}); }catch(e){} }
+$('gOne').addEventListener('change',async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  status('Splitting your recording…');
+  try{
+    const {d,sr}=await decodeFile(f); const segs=splitWords(d,sr,CLIPS.length);
+    if(segs.length!==CLIPS.length){ status(`Found ${segs.length} words, expected ${CLIPS.length}. Leave a clear pause between words and try again.`); $('gNote').textContent=`Couldn’t match the recording: found ${segs.length} words, expected ${CLIPS.length}. Nothing was changed.`; return; }
+    for(let i=0;i<CLIPS.length;i++) await storeClip(CLIPS[i][0],segs[i],sr);
+    await loadClips(true); status(`Loaded ${CLIPS.length} voice clips`); $('gNote').textContent='';
+  }catch(err){ status('Couldn’t read that audio file'); }
+});
+$('gMany').addEventListener('change',async e=>{
+  const files=[...e.target.files]; e.target.value=''; if(!files.length) return;
+  const byText={}; CLIPS.forEach(([id,txt])=>{ byText[id]=id; byText[slug(txt)]=id; });
+  let ok=0; const miss=[];
+  for(const f of files){
+    const id=byText[slug(f.name.replace(/\.[^.]+$/,''))];
+    if(!id){ miss.push(f.name); continue; }
+    try{ const {d,sr}=await decodeFile(f); await storeClip(id,trimBuf(d,sr),sr); ok++; }catch(err){ miss.push(f.name); }
+  }
+  await loadClips(true);
+  status(`Loaded ${ok} clip${ok===1?'':'s'}`);
+  $('gNote').textContent=miss.length?`Not matched (rename to a clip name like chorus.mp3): ${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}`:'';
+});
+$('gClear').addEventListener('click',async()=>{ try{ await idb.clear(); }catch(e){} await loadClips(true); $('gNote').textContent=''; status('Removed loaded clips'); });
+$('gTest').addEventListener('click',async()=>{
+  if(!ensureCtx()) return; if(playing) stop(); await loadClips();
+  const spb=60/S.bpm, t0=countIn(ctx.currentTime+.1,1,spb);
+  for(let b=0;b<8;b++) clickAt(t0+b*spb,b%4===0);
+  sayAt('chorus',t0); sayAt('all-in',t0+2*spb); sayAt('1',t0+4*spb);
+});
+
+function renderClips(){
+  const n=CLIPS.filter(([id])=>clipBuf[id]).length;
+  $('gClipCount').textContent=`${n} of ${CLIPS.length} recorded`;
+  const grid=$('gGrid'); grid.innerHTML='';
+  CLIPS.forEach(([id,txt])=>{
+    const b=document.createElement('button'); b.type='button'; b.className=clipSrc[id]||'phone';
+    b.innerHTML=`<i></i><span>${esc(txt)}</span>`;
+    b.title=clipSrc[id]==='mine'?'Your recording':clipSrc[id]==='app'?'App recording':'Phone voice';
+    b.addEventListener('click',()=>{ if(!ensureCtx()) return; sayAt(id,ctx.currentTime+.03); });
+    grid.appendChild(b);
+  });
+}
+function renderGuide(){
+  const g=S.guide;
+  $('guidePanel').classList.toggle('off',!g.on);
+  $('gOn').checked=g.on; $('gCount').value=g.count; $('gAhead').value=g.ahead;
+  $('gCalls').checked=g.calls; $('gLyr').checked=g.lyr; $('gVol').value=g.vol; $('gClick').value=g.click; $('gSplit').checked=g.split;
+  $('gLyr').parentElement.title=S.playMode==='lyrics'?'':'Lyric cues speak in “Play along with lyrics” mode';
+  const sec=S.sections[S.cur]; $('gCueSec').textContent=secLabel(sec.name);
+  const sel=$('gCue'); if(!sel.options.length){ sel.add(new Option('None','')); CUES.forEach(c=>sel.add(new Option(clipText(c),c))); }
+  sel.value=sec.cue||'';
+  if(!$('gGrid').children.length) renderClips();
+}
+const gset=(k,v)=>{ S.guide[k]=v; save(); renderGuide(); };
+$('gOn').addEventListener('change',e=>{ gset('on',e.target.checked); if(e.target.checked) loadClips(); });
+$('gCount').addEventListener('change',e=>gset('count',+e.target.value));
+$('gAhead').addEventListener('change',e=>gset('ahead',+e.target.value));
+$('gCalls').addEventListener('change',e=>gset('calls',e.target.checked));
+$('gLyr').addEventListener('change',e=>gset('lyr',e.target.checked));
+$('gVol').addEventListener('input',e=>{ S.guide.vol=+e.target.value; if(voiceG) voiceG.gain.value=gVolOf(); save(); });
+$('gClick').addEventListener('input',e=>{ S.guide.click=+e.target.value; if(clickG) clickG.gain.value=cVolOf(); save(); });
+$('gSplit').addEventListener('change',e=>{ gset('split',e.target.checked); setSplit(); });
+$('gCue').addEventListener('change',e=>{ S.sections[S.cur].cue=e.target.value; save(); });
+$('gClips').addEventListener('toggle',()=>{ if($('gClips').open) loadClips(); });
 
 function applyFollow(){}
 function hostSync(){}

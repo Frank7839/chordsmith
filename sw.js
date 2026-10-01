@@ -1,6 +1,6 @@
 // Chordsmith Studio offline helper.
 // Change VERSION whenever you upload a new index.html, so phones pick up the update.
-const VERSION = 'chordsmith-v1';
+const VERSION = 'chordsmith-v2';
 const CORE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './privacy.html'];
 
 self.addEventListener('install', e => {
